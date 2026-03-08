@@ -1,4 +1,4 @@
-name = "microlaunch-api"
+name = "nodemeld-api"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
@@ -9,3 +9,7 @@ database_id = "818d8759-01d4-4951-92cf-c6771c8bbbad"
 
 [triggers]
 crons = ["0 */6 * * *"]
+
+# Set these secrets via: wrangler secret put RESEND_API_KEY
+# wrangler secret put GROQ_API_KEY
+# wrangler secret put SERPER_API_KEY
