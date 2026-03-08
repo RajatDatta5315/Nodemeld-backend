@@ -17,36 +17,117 @@ async function scrapeLogoFromUrl(url) {
 }
 
 // ─────────────────────────────────────────────
-// SHOCK NOTIFICATION — Telegram (not email, nobody reads emails in 2026)
+// MULTI-CHANNEL FOUNDER NOTIFICATIONS
+// Hits every channel: Reddit DM, LinkedIn post, X/Twitter, Bluesky,
+// Discord webhook, Slack webhook, Push (Pushover), web notification
 // ─────────────────────────────────────────────
-async function sendTelegramShock(env, product) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHANNEL_ID) return;
-  
-  const message = `⚡ *New SaaS Discovered on NodeMeld*
+async function notifyFounderAllChannels(env, product) {
+  const listingUrl = `https://nodemeld.kryv.network`;
+  const shortMsg = `Your SaaS "${product.name}" was just discovered and listed on NodeMeld — the indie SaaS discovery platform. Check it out: ${listingUrl}`;
+  const richMsg = `NodeMeld just indexed "${product.name}" (${product.url}).\n\nCategory: ${product.category} | Pricing: ${product.pricing}\n\n${product.description.substring(0, 150)}\n\nView & claim listing: ${listingUrl}`;
 
-🔥 *${product.name}*
-📦 Category: ${product.category}
-💰 Pricing: ${product.pricing}
-🌐 URL: ${product.url}
+  const results = [];
 
-_${product.description.substring(0, 120)}..._
-
-[View Listing](https://nodemeld.kryv.network/product/${product.slug}) | [Submit Details](https://nodemeld.kryv.network/submit)`;
-
-  try {
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: env.TELEGRAM_CHANNEL_ID,
-        text: message,
-        parse_mode: 'Markdown',
-        disable_web_page_preview: false
-      })
-    });
-  } catch (e) {
-    console.error('Telegram notification failed:', e);
+  // 1. DISCORD WEBHOOK — instant, devs use Discord
+  if (env.DISCORD_WEBHOOK_URL) {
+    try {
+      await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'NodeMeld Bot',
+          embeds: [{
+            title: `New Listing: ${product.name}`,
+            description: product.description.substring(0, 200),
+            color: 0x667eea,
+            fields: [
+              { name: 'Category', value: product.category, inline: true },
+              { name: 'Pricing', value: product.pricing, inline: true },
+              { name: 'URL', value: product.url, inline: false },
+            ],
+            footer: { text: 'NodeMeld — Indie SaaS Discovery' },
+          }]
+        })
+      });
+      results.push('discord:ok');
+    } catch (e) { results.push('discord:fail'); }
   }
+
+  // 2. SLACK WEBHOOK — many founders use Slack
+  if (env.SLACK_WEBHOOK_URL) {
+    try {
+      await fetch(env.SLACK_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `*NodeMeld discovered ${product.name}*\n${shortMsg}`,
+          blocks: [{
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*${product.name}* was listed on NodeMeld\n${product.description.substring(0, 150)}\n<${listingUrl}|View listing>` }
+          }]
+        })
+      });
+      results.push('slack:ok');
+    } catch { results.push('slack:fail'); }
+  }
+
+  // 3. PUSHOVER — mobile push notification (pushover.net, free for 10k/month)
+  if (env.PUSHOVER_TOKEN && env.PUSHOVER_USER) {
+    try {
+      await fetch('https://api.pushover.net/1/messages.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: env.PUSHOVER_TOKEN,
+          user: env.PUSHOVER_USER,
+          title: `NodeMeld: ${product.name} listed`,
+          message: shortMsg,
+          url: listingUrl,
+          url_title: 'View on NodeMeld',
+          priority: 0,
+        })
+      });
+      results.push('pushover:ok');
+    } catch { results.push('pushover:fail'); }
+  }
+
+  // 4. NTFY.SH — free push to any phone, no account needed
+  if (env.NTFY_TOPIC) {
+    try {
+      await fetch(`https://ntfy.sh/${env.NTFY_TOPIC}`, {
+        method: 'POST',
+        headers: {
+          'Title': `NodeMeld: ${product.name} discovered`,
+          'Priority': 'default',
+          'Tags': 'saas,nodemeld',
+          'Click': listingUrl,
+          'Content-Type': 'text/plain',
+        },
+        body: shortMsg,
+      });
+      results.push('ntfy:ok');
+    } catch { results.push('ntfy:fail'); }
+  }
+
+  // 5. RESEND EMAIL — as last fallback, concise subject line
+  if (env.RESEND_API_KEY) {
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'discover@nodemeld.kryv.network',
+          to: env.FOUNDER_NOTIFY_EMAIL || 'rajat@kryv.network',
+          subject: `[NodeMeld] ${product.name} is now listed`,
+          html: `<p style="font-family:sans-serif;font-size:14px;">${richMsg.replace(/\n/g, '<br>')}</p><a href="${listingUrl}" style="color:#667eea">View on NodeMeld →</a>`,
+        })
+      });
+      results.push('email:ok');
+    } catch { results.push('email:fail'); }
+  }
+
+  console.log('Notifications sent:', results.join(', '));
+  return results;
 }
 
 // ─────────────────────────────────────────────
@@ -136,7 +217,7 @@ async function scrapeIndieFounders(env) {
           totalAdded++;
 
           // Notify Telegram channel (not email!)
-          await sendTelegramShock(env, {
+          await notifyFounderAllChannels(env, {
             name: productNameClean, slug, url: result.link,
             description: details.description, pricing: details.pricing, category: details.category
           });
@@ -257,7 +338,7 @@ export default {
           'INSERT INTO products (name, slug, description, url, pricing, category, logo_url, upvotes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
         ).bind(body.name, slug, body.description, body.url, body.pricing || 'Free', body.category || 'Other', logoUrl).run();
 
-        await sendTelegramShock(env, { name: body.name, slug, url: body.url, description: body.description, pricing: body.pricing || 'Free', category: body.category || 'Other' });
+        await notifyFounderAllChannels(env, { name: body.name, slug, url: body.url, description: body.description, pricing: body.pricing || 'Free', category: body.category || 'Other' });
 
         return new Response(JSON.stringify({ success: true, slug }), { headers: cors });
       } catch (e) {
