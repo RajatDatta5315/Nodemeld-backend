@@ -5,7 +5,7 @@ function isSpam(text) {
 }
 
 function isActualProduct(title) {
-  const junkWords = ['best', 'top', 'tried', 'tested', 'guide', 'list', 'review', 'comparison', 'vs'];
+  const junkWords = ['best', 'top', 'tried', 'tested', 'guide', 'list', 'review', 'comparison', 'vs', 'how to', 'what is'];
   return !junkWords.some(word => title.toLowerCase().includes(word));
 }
 
@@ -13,190 +13,144 @@ async function scrapeLogoFromUrl(url) {
   try {
     const domain = new URL(url).hostname;
     return `https://logo.clearbit.com/${domain}`;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 // ─────────────────────────────────────────────
-// SHOCK EMAIL — Send founder notification via Resend
+// SHOCK NOTIFICATION — Telegram (not email, nobody reads emails in 2026)
 // ─────────────────────────────────────────────
-async function sendShockEmail(env, product) {
-  if (!env.RESEND_API_KEY) return;
+async function sendTelegramShock(env, product) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHANNEL_ID) return;
+  
+  const message = `⚡ *New SaaS Discovered on NodeMeld*
 
-  const domain = new URL(product.url).hostname;
-  const founderEmail = `hello@${domain}`;
+🔥 *${product.name}*
+📦 Category: ${product.category}
+💰 Pricing: ${product.pricing}
+🌐 URL: ${product.url}
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace; margin: 0; padding: 40px 20px; }
-    .container { max-width: 600px; margin: 0 auto; }
-    .badge { background: linear-gradient(135deg, #667eea, #764ba2); padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; color: white; margin-bottom: 24px; }
-    h1 { font-size: 28px; font-weight: 900; color: #fff; margin: 0 0 8px 0; }
-    .domain { font-size: 14px; color: #667eea; margin-bottom: 32px; }
-    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-    .label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
-    .value { font-size: 14px; color: #e0e0e0; line-height: 1.6; }
-    .cta { display: block; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; padding: 16px 32px; border-radius: 12px; font-weight: 800; font-size: 14px; text-align: center; margin: 32px 0; letter-spacing: 2px; text-transform: uppercase; }
-    .footer { font-size: 10px; color: #333; text-align: center; margin-top: 40px; }
-    .highlight { color: #667eea; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="badge">⚡ NodeMeld Discovery Alert</div>
-    <h1>We Found <span class="highlight">${product.name}</span></h1>
-    <div class="domain">${domain}</div>
+_${product.description.substring(0, 120)}..._
 
-    <div class="card">
-      <div class="label">Our scouts discovered your product</div>
-      <div class="value">
-        <strong>${product.name}</strong> has been automatically indexed on <strong>NodeMeld</strong> — 
-        the AI-curated SaaS discovery platform built for founders.
-        <br><br>
-        Your product is now visible to thousands of indie hackers, developers, and decision-makers 
-        who discover tools exactly like yours every day.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">Your listing snapshot</div>
-      <div class="value">
-        📦 <strong>Category:</strong> ${product.category}<br>
-        💰 <strong>Pricing:</strong> ${product.pricing}<br>
-        📝 <strong>Description:</strong> ${product.description.substring(0, 120)}...
-      </div>
-    </div>
-
-    <a href="https://nodemeld.kryv.network/product/${product.slug}" class="cta">
-      🔥 View Your Listing on NodeMeld
-    </a>
-
-    <div class="card">
-      <div class="label">Want to boost your listing?</div>
-      <div class="value">
-        Submit your official description, logo, and details to get a verified badge. 
-        Verified listings get 5x more clicks from our community.
-      </div>
-    </div>
-
-    <div class="footer">
-      NodeMeld by KRYV Network · nodemeld.kryv.network<br>
-      You received this because we discovered ${domain} on the web.<br>
-      <a href="https://nodemeld.kryv.network/unsubscribe" style="color: #333;">Unsubscribe</a>
-    </div>
-  </div>
-</body>
-</html>`;
+[View Listing](https://nodemeld.kryv.network/product/${product.slug}) | [Submit Details](https://nodemeld.kryv.network/submit)`;
 
   try {
-    await fetch('https://api.resend.com/emails', {
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'NodeMeld Discovery <discover@nodemeld.kryv.network>',
-        to: [founderEmail],
-        subject: `⚡ ${product.name} was just discovered on NodeMeld`,
-        html
+        chat_id: env.TELEGRAM_CHANNEL_ID,
+        text: message,
+        parse_mode: 'Markdown',
+        disable_web_page_preview: false
       })
     });
-    console.log(`Shock email sent to ${founderEmail}`);
   } catch (e) {
-    console.error('Email send failed:', e);
+    console.error('Telegram notification failed:', e);
   }
 }
 
-async function scrapeRealSaaS(env) {
+// ─────────────────────────────────────────────
+// SCRAPE SMALL PROFITABLE INDIE SAAS
+// Sources: r/SideProject, r/indiehackers, IndieHackers, BetaList, Product Hunt (indie filter)
+// Target: Small founders making $100-$10k MRR, NOT VC-backed startups
+// ─────────────────────────────────────────────
+async function scrapeIndieFounders(env) {
+  // Search queries specifically targeting indie/solo founders
   const queries = [
-    'notion productivity tool site:notion.so',
-    'linear issue tracker site:linear.app',
-    'figma design tool site:figma.com',
-    'vercel deployment site:vercel.com',
-    'stripe payments site:stripe.com'
+    'site:reddit.com/r/SideProject launched my saas',
+    'site:reddit.com/r/indiehackers built tool revenue',
+    'site:reddit.com/r/startups solo founder product launched',
+    'indie saas profitable bootstrapped tool 2025 2026',
+    'built micro saas solo founder making money online tool',
+    'launched my app indie hacker bootstrapped profitable',
   ];
-  
+
   let totalAdded = 0;
-  
+
   for (const query of queries) {
     try {
       const res = await fetch('https://google.serper.dev/search', {
         method: 'POST',
-        headers: {
-          'X-API-KEY': env.SERPER_API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ q: query, num: 5 })
+        headers: { 'X-API-KEY': env.SERPER_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: 8 })
       });
-      
+
       const data = await res.json();
-      
+
       for (const result of (data.organic || [])) {
-        if (!result.link || !isActualProduct(result.title)) continue;
-        
-        const domain = new URL(result.link).hostname.replace('www.', '');
+        if (!result.link) continue;
+
+        // Skip Reddit itself — we want the actual product URL, not the Reddit post
+        // Skip big VC-backed companies
+        const skipDomains = ['reddit.com', 'ycombinator.com', 'techcrunch.com', 'producthunt.com', 'twitter.com', 'x.com', 'linkedin.com', 'medium.com', 'substack.com'];
+        const isSkip = skipDomains.some(d => result.link.includes(d));
+        if (isSkip) continue;
+
+        // Extract product URLs from snippets/titles
+        if (!isActualProduct(result.title || '')) continue;
+
+        let domain;
+        try {
+          domain = new URL(result.link).hostname.replace('www.', '');
+        } catch { continue; }
+
+        // Skip if too generic (news sites, etc.)
+        const genericTLDs = ['medium.com', 'dev.to', 'hashnode.dev', 'wordpress.com', 'blogspot.com'];
+        if (genericTLDs.some(d => domain.includes(d))) continue;
+
         const productName = domain.split('.')[0];
         const productNameClean = productName.charAt(0).toUpperCase() + productName.slice(1);
-        
-        const existing = await env.DB.prepare('SELECT id FROM products WHERE url = ? OR name = ?').bind(result.link, productNameClean).first();
+
+        // Avoid duplicates
+        const existing = await env.DB.prepare('SELECT id FROM products WHERE url = ? OR name = ?')
+          .bind(result.link, productNameClean).first();
         if (existing) continue;
-        
+
         try {
           const logoUrl = await scrapeLogoFromUrl(result.link);
-          
+
           const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${env.GROQ_API_KEY}`,
-              'Content-Type': 'application/json'
-            },
+            headers: { 'Authorization': `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model: 'llama-3.3-70b-versatile',
               messages: [{
                 role: 'user',
-                content: `Product: ${productNameClean} at ${result.link}. Generate JSON: {"description":"50-80 word description of what this tool does and who uses it","pricing":"estimate like Free, $9/mo, $99/year","category":"Productivity, Marketing, Development, Design, AI, or Analytics"}`
+                content: `Indie SaaS product: ${productNameClean} at ${result.link}. Context: ${result.snippet || ''}. Generate JSON only: {"description":"60-80 word description of what this indie tool does, who the target user is, and what problem it solves. Be specific.","pricing":"realistic estimate: Free, Freemium, $5-$29/mo, $49-$99/mo, or One-time","category":"Productivity, Marketing, Development, Design, AI, Analytics, Finance, or Other","is_indie":true}`
               }],
-              temperature: 0.7
+              temperature: 0.3
             })
           });
-          
+
           const aiData = await aiRes.json();
-          const details = JSON.parse(aiData.choices[0].message.content);
-          
-          const slug = productNameClean.toLowerCase() + '-' + Date.now();
-          
+          let details;
+          try { details = JSON.parse(aiData.choices[0].message.content); }
+          catch { continue; }
+
+          const slug = productNameClean.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60) + '-' + Date.now();
+
           await env.DB.prepare(
-            'INSERT INTO products (name, slug, description, url, pricing, category, logo_url) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO products (name, slug, description, url, pricing, category, logo_url, upvotes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
           ).bind(productNameClean, slug, details.description, result.link, details.pricing, details.category, logoUrl).run();
-          
+
           totalAdded++;
 
-          // 🔔 SHOCK EMAIL — notify the founder
-          await sendShockEmail(env, {
-            name: productNameClean,
-            slug,
-            url: result.link,
-            description: details.description,
-            pricing: details.pricing,
-            category: details.category
+          // Notify Telegram channel (not email!)
+          await sendTelegramShock(env, {
+            name: productNameClean, slug, url: result.link,
+            description: details.description, pricing: details.pricing, category: details.category
           });
 
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 1500));
         } catch (e) {
-          console.error('AI error:', e);
+          console.error('Processing error:', e.message);
         }
       }
     } catch (e) {
-      console.error('Serper error:', e);
+      console.error('Serper query error:', e.message);
     }
   }
-  
+
   return totalAdded;
 }
 
@@ -219,7 +173,7 @@ export default {
         const limit = 50;
         const offset = (page - 1) * limit;
         const { results } = await env.DB.prepare(
-          'SELECT * FROM products ORDER BY upvotes DESC, RANDOM() LIMIT ? OFFSET ?'
+          'SELECT * FROM products ORDER BY upvotes DESC, id DESC LIMIT ? OFFSET ?'
         ).bind(limit, offset).all();
         return new Response(JSON.stringify(results || []), { headers: cors });
       } catch (e) {
@@ -232,7 +186,7 @@ export default {
       const q = url.searchParams.get('q') || '';
       try {
         const { results } = await env.DB.prepare(
-          'SELECT * FROM products WHERE name LIKE ? OR description LIKE ? OR category LIKE ? ORDER BY upvotes DESC, views DESC LIMIT 100'
+          'SELECT * FROM products WHERE name LIKE ? OR description LIKE ? OR category LIKE ? ORDER BY upvotes DESC LIMIT 100'
         ).bind(`%${q}%`, `%${q}%`, `%${q}%`).all();
         return new Response(JSON.stringify(results || []), { headers: cors });
       } catch (e) {
@@ -280,36 +234,30 @@ export default {
       }
     }
 
-    // SUBMIT
+    // SUBMIT (founder submits their own SaaS)
     if (url.pathname === '/api/submit' && request.method === 'POST') {
       try {
         const body = await request.json();
-        if (!body.name || !body.url || !body.description) {
+        if (!body.name || !body.url || !body.description)
           return new Response(JSON.stringify({ error: 'Missing: name, url, description' }), { status: 400, headers: cors });
-        }
-        if (body.description.length < 50) {
-          return new Response(JSON.stringify({ error: 'Description must be MINIMUM 50 characters (you have ' + body.description.length + ')' }), { status: 400, headers: cors });
-        }
-        if (isSpam(body.name + body.description)) {
+        if (body.description.length < 50)
+          return new Response(JSON.stringify({ error: 'Description must be at least 50 characters' }), { status: 400, headers: cors });
+        if (isSpam(body.name + body.description))
           return new Response(JSON.stringify({ error: 'Spam detected' }), { status: 400, headers: cors });
-        }
+
         const existing = await env.DB.prepare('SELECT id FROM products WHERE url = ? OR name = ?').bind(body.url, body.name).first();
-        if (existing) {
-          return new Response(JSON.stringify({ error: 'This SaaS already exists in our database!' }), { status: 400, headers: cors });
-        }
-        const slug = body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 100) + '-' + Date.now();
+        if (existing)
+          return new Response(JSON.stringify({ error: 'This SaaS already exists!' }), { status: 400, headers: cors });
+
+        const slug = body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80) + '-' + Date.now();
         let logoUrl = body.logo_url;
-        if (!logoUrl || !logoUrl.startsWith('data:image')) {
-          logoUrl = await scrapeLogoFromUrl(body.url);
-        } else if (logoUrl.length > 500000) {
-          logoUrl = await scrapeLogoFromUrl(body.url);
-        }
+        if (!logoUrl || logoUrl.length > 500000) logoUrl = await scrapeLogoFromUrl(body.url);
+
         await env.DB.prepare(
           'INSERT INTO products (name, slug, description, url, pricing, category, logo_url, upvotes) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
         ).bind(body.name, slug, body.description, body.url, body.pricing || 'Free', body.category || 'Other', logoUrl).run();
 
-        // Send shock email to the founder who submitted
-        await sendShockEmail(env, { name: body.name, slug, url: body.url, description: body.description, pricing: body.pricing || 'Free', category: body.category || 'Other' });
+        await sendTelegramShock(env, { name: body.name, slug, url: body.url, description: body.description, pricing: body.pricing || 'Free', category: body.category || 'Other' });
 
         return new Response(JSON.stringify({ success: true, slug }), { headers: cors });
       } catch (e) {
@@ -317,10 +265,10 @@ export default {
       }
     }
 
-    // MANUAL SCRAPE
+    // MANUAL SCRAPE TRIGGER
     if (url.pathname === '/api/scrape-now' && request.method === 'POST') {
       try {
-        const added = await scrapeRealSaaS(env);
+        const added = await scrapeIndieFounders(env);
         return new Response(JSON.stringify({ success: true, added }), { headers: cors });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors });
@@ -331,21 +279,18 @@ export default {
     if (url.pathname === '/api/stats') {
       try {
         const total = await env.DB.prepare('SELECT COUNT(*) as count FROM products').first();
-        const categories = await env.DB.prepare('SELECT category, COUNT(*) as count FROM products GROUP BY category ORDER BY count DESC').all();
-        return new Response(JSON.stringify({ total: total?.count || 0, categories: categories.results || [] }), { headers: cors });
+        const cats = await env.DB.prepare('SELECT category, COUNT(*) as count FROM products GROUP BY category ORDER BY count DESC').all();
+        return new Response(JSON.stringify({ total: total?.count || 0, categories: cats.results || [] }), { headers: cors });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors });
       }
     }
 
-    return new Response('NodeMeld API v2 — KRYV Network', { headers: cors });
+    return new Response('NodeMeld API v3 — KRYV Network', { headers: cors });
   },
 
   async scheduled(event, env, ctx) {
-    try {
-      await scrapeRealSaaS(env);
-    } catch (e) {
-      console.error('Scheduled scrape error:', e);
-    }
+    try { await scrapeIndieFounders(env); }
+    catch (e) { console.error('Cron error:', e); }
   }
 };
