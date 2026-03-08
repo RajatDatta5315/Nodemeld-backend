@@ -367,6 +367,45 @@ export default {
       }
     }
 
+    // ═══ GITHUB OAUTH CALLBACK — GET /api/github/callback?code=XXX ═════
+    if (url.pathname === '/api/github/callback' && request.method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (!code) return new Response(JSON.stringify({ error: 'code required' }), { status: 400, headers: cors });
+      try {
+        const res = await fetch('https://github.com/login/oauth/access_token', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code })
+        });
+        const data = await res.json();
+        const token = data.access_token;
+        if (!token) return new Response(JSON.stringify({ error: 'OAuth failed', detail: data }), { status: 400, headers: cors });
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'NodeMeld-KRYV' }
+        });
+        const user = await userRes.json();
+        return new Response(JSON.stringify({ access_token: token, username: user.login, avatar: user.avatar_url }), { headers: cors });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors }); }
+    }
+
+    // ═══ MY PRODUCTS — POST /api/my-products ═══════════════════════════
+    if (url.pathname === '/api/my-products' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { github_token } = body;
+        if (!github_token) return new Response(JSON.stringify({ error: 'github_token required' }), { status: 400, headers: cors });
+        const ghRes = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${github_token}`, 'User-Agent': 'NodeMeld-KRYV' }
+        });
+        const ghUser = await ghRes.json();
+        if (!ghUser.login) return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: cors });
+        const { results } = await env.DB.prepare(
+          'SELECT id, name, slug, description, url, logo_url, pricing, category, upvotes FROM products WHERE owner_github = ? ORDER BY upvotes DESC'
+        ).bind(ghUser.login).all();
+        return new Response(JSON.stringify({ products: results || [], username: ghUser.login }), { headers: cors });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors }); }
+    }
+
     // ═══ CLAIM LISTING via GitHub OAuth ════════════════════════════
     if (url.pathname === '/api/claim' && request.method === 'POST') {
       try {
