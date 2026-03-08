@@ -367,6 +367,50 @@ export default {
       }
     }
 
+    // ═══ CLAIM LISTING via GitHub OAuth ════════════════════════════
+    if (url.pathname === '/api/claim' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { slug, github_token } = body;
+        if (!slug || !github_token) return new Response(JSON.stringify({ error: 'slug and github_token required' }), { status: 400, headers: cors });
+        const ghRes = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${github_token}`, 'User-Agent': 'NodeMeld-KRYV' } });
+        if (!ghRes.ok) return new Response(JSON.stringify({ error: 'Invalid GitHub token' }), { status: 401, headers: cors });
+        const ghUser = await ghRes.json();
+        const product = await env.DB.prepare('SELECT id, owner_github FROM products WHERE slug = ?').bind(slug).first();
+        if (!product) return new Response(JSON.stringify({ error: 'Product not found' }), { status: 404, headers: cors });
+        if (product.owner_github && product.owner_github !== ghUser.login) return new Response(JSON.stringify({ error: 'Already claimed' }), { status: 403, headers: cors });
+        await env.DB.prepare('UPDATE products SET owner_github = ?, owner_avatar = ? WHERE slug = ?').bind(ghUser.login, ghUser.avatar_url, slug).run();
+        return new Response(JSON.stringify({ success: true, claimed_by: ghUser.login, slug }), { headers: cors });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors }); }
+    }
+
+    // ═══ EDIT LISTING — PUT /api/edit/:slug ════════════════════════
+    if (url.pathname.startsWith('/api/edit/') && request.method === 'PUT') {
+      try {
+        const slug = url.pathname.split('/').pop();
+        const body = await request.json();
+        const { github_token, name, description, logo_url, pricing, category, url: siteUrl } = body;
+        if (!github_token) return new Response(JSON.stringify({ error: 'github_token required' }), { status: 400, headers: cors });
+        const ghRes = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${github_token}`, 'User-Agent': 'NodeMeld-KRYV' } });
+        if (!ghRes.ok) return new Response(JSON.stringify({ error: 'Invalid GitHub token' }), { status: 401, headers: cors });
+        const ghUser = await ghRes.json();
+        const product = await env.DB.prepare('SELECT id, owner_github FROM products WHERE slug = ?').bind(slug).first();
+        if (!product) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: cors });
+        if (product.owner_github && product.owner_github !== ghUser.login) return new Response(JSON.stringify({ error: 'Not authorized' }), { status: 403, headers: cors });
+        const sets = []; const vals = [];
+        if (name)        { sets.push('name = ?');        vals.push(name); }
+        if (description) { sets.push('description = ?'); vals.push(description); }
+        if (logo_url)    { sets.push('logo_url = ?');    vals.push(logo_url); }
+        if (pricing)     { sets.push('pricing = ?');     vals.push(pricing); }
+        if (category)    { sets.push('category = ?');    vals.push(category); }
+        if (siteUrl)     { sets.push('url = ?');         vals.push(siteUrl); }
+        if (!sets.length) return new Response(JSON.stringify({ error: 'No fields' }), { status: 400, headers: cors });
+        vals.push(slug);
+        await env.DB.prepare(`UPDATE products SET ${sets.join(', ')} WHERE slug = ?`).bind(...vals).run();
+        return new Response(JSON.stringify({ success: true, slug, updated_by: ghUser.login }), { headers: cors });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors }); }
+    }
+
     return new Response('NodeMeld API v3 — KRYV Network', { headers: cors });
   },
 
@@ -375,3 +419,8 @@ export default {
     catch (e) { console.error('Cron error:', e); }
   }
 };
+
+/* D1 SCHEMA MIGRATION — run once:
+   wrangler d1 execute nodemeld-db --command "ALTER TABLE products ADD COLUMN owner_github TEXT;"
+   wrangler d1 execute nodemeld-db --command "ALTER TABLE products ADD COLUMN owner_avatar TEXT;"
+*/
